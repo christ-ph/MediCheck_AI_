@@ -18,3 +18,17 @@ urlpatterns += [path('api/', include('core.review_urls'))]
 
 from django.urls import include
 urlpatterns += [path('api/', include('core.intelligence_urls'))]
+
+# Render health check
+from django.http import JsonResponse
+from django.db import connection, DatabaseError
+
+def health(request):
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+    except DatabaseError:
+        return JsonResponse({"status": "unavailable"}, status=503)
+    return JsonResponse({"status": "ok", "service": "MediCheck AI"})
+
+urlpatterns += [path("health/", health)]
