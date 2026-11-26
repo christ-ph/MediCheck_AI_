@@ -1,0 +1,52 @@
+import React, { useState, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import './style.css';
+
+async function api(path, token='', method='GET', data=null) {
+  const res = await fetch('/api/'+path, {method, headers:{Accept:'application/json', ...(token?{Authorization:`Bearer ${token}`} : {}), ...(data!==null?{'Content-Type':'application/json'}:{})}, ...(data!==null?{body:JSON.stringify(data)}:{})});
+  const result = await res.json().catch(()=>null);
+  if (!res.ok) { const e = new Error(result?.detail || (result?JSON.stringify(result):`HTTP ${res.status}`)); e.status=res.status; throw e; }
+  return result;
+}
+const sections = {overview:'Tableau de bord',professionals:'Professionnels de santé',users:'Utilisateurs',medicines:'Médicaments',reports:'Signalements'};
+function App(){
+  const [token,T]=useState(''), [username,U]=useState(''), [password,P]=useState('');
+  const [section,S]=useState('overview'), [stats,Stats]=useState(null), [data,D]=useState(null);
+  const [q,Q]=useState(''), [search,Search]=useState(''), [filter,F]=useState(''), [page,Page]=useState(1), [revision,R]=useState(0);
+  const [error,E]=useState(''), [message,M]=useState(''), [loading,L]=useState(false), [busy,B]=useState(false);
+  function logout(){T('');P('');D(null);Stats(null);S('overview');Q('');Search('');F('');Page(1);M('');E('');}
+  function fail(e){if(e.status===401||e.status===403){logout();E('Session expirée ou accès administrateur refusé.');}else E(e.message);}
+  async function login(e){e.preventDefault();B(true);E('');try{const j=await api('token/','','POST',{username,password});const info=await api('admin/overview/',j.access);Stats(info);P('');T(j.access);}catch(e){E(e.message);}finally{B(false);}}
+  function navigate(key){S(key);Q('');Search('');F('');Page(1);D(null);E('');M('');}
+  useEffect(()=>{if(!token)return;let alive=true;L(true);E('');D(null);
+    const path=section==='overview'?'admin/overview/':`admin/${section}/?${new URLSearchParams({q:search,status:filter,page:String(page)})}`;
+    api(path,token).then(j=>{if(alive){if(section==='overview')Stats(j);else D(j);}}).catch(e=>{if(alive)fail(e);}).finally(()=>{if(alive)L(false);});
+    return()=>{alive=false;};
+  },[token,section,search,filter,page,revision]);
+  async function action(path,payload,question){if(!window.confirm(question))return;B(true);E('');M('');try{await api(path,token,'PATCH',payload);M('Modification enregistrée.');Page(1);R(x=>x+1);}catch(e){fail(e);}finally{B(false);}}
+  async function downloadProof(id){
+    B(true); E('');
+    try {
+      const res=await fetch(`/api/admin/professionals/${id}/proof/`,{headers:{Authorization:`Bearer ${token}`}});
+      if(!res.ok){const e=new Error('Impossible de télécharger le justificatif.');e.status=res.status;throw e;}
+      const url=URL.createObjectURL(await res.blob());
+      const link=document.createElement('a');link.href=url;
+      link.download=res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1]||'justificatif';
+      document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(e){fail(e);}finally{B(false);}
+  }
+  function decide(r, verified){
+    let reason='';
+    if(!verified){const answer=window.prompt('Motif du refus ou de la révocation (obligatoire) :');if(!answer?.trim())return;reason=answer.trim();}
+    action(`admin/professionals/${r.id}/`,{verified,reason},verified?'Confirmez-vous avoir vérifié le justificatif et le numéro professionnel auprès de son organisme émetteur ?':'Confirmer la décision ?');
+  }
+  if(!token)return <main className="login"><div className="login-art"><div className="mark">M+</div><h1>MediCheck AI</h1><p>Information pharmaceutique et supervision.</p><span>PORTAIL ADMINISTRATEUR</span></div><form className="login-form" onSubmit={login}><div className="eyebrow">ESPACE SÉCURISÉ</div><h1>Connexion</h1><p>Utilisez votre compte administrateur Django.</p>{error&&<div role="alert" className="error">{error}</div>}<label>Identifiant<input required autoComplete="username" value={username} onChange={e=>U(e.target.value)}/></label><label>Mot de passe<input required type="password" autoComplete="current-password" value={password} onChange={e=>P(e.target.value)}/></label><button disabled={busy}>{busy?'Connexion…':'Se connecter'}</button></form></main>;
+  const rows=data?.results||[];
+  return <div className="layout"><aside><div className="brand">MediCheck <span>AI</span><small>Administration</small></div><nav>{Object.entries(sections).map(([k,v])=><button key={k} disabled={busy} className={section===k?'selected':''} onClick={()=>navigate(k)}>{v}</button>)}</nav><button className="logout" disabled={busy} onClick={logout}>Se déconnecter</button></aside><main className="workspace"><header><div><div className="eyebrow">ESPACE ADMINISTRATION</div><h1>{sections[section]}</h1></div><span className="tag">{stats?.username||username}</span></header>{error&&<div role="alert" className="error">{error} <button className="secondary" onClick={()=>R(x=>x+1)}>Réessayer</button></div>}{message&&<div role="status" className="notice">{message}</div>}
+  {section==='overview'?<><div className="hero"><h2>Bienvenue dans votre espace de gestion</h2><p>Consultez les demandes et supervisez le catalogue de MediCheck AI.</p></div>{loading&&<p>Chargement…</p>}{stats&&<div className="cards">{[['Utilisateurs','users','users'],['Médicaments','medicines','medicines'],['Demandes en attente','pending','professionals'],['Professionnels validés','verified','professionals'],['Signalements','reports','reports']].map(([label,k,target])=><button className="stat" key={k} onClick={()=>{navigate(target);if(k==='pending'||k==='verified')F(k);}}><span>{label}</span><strong>{stats[k]}</strong><small>Consulter</small></button>)}</div>}</>:<section className="panel"><div className="toolbar"><form onSubmit={e=>{e.preventDefault();Page(1);Search(q.trim());}}><input aria-label="Rechercher" placeholder="Rechercher…" value={q} onChange={e=>Q(e.target.value)}/><button disabled={loading||busy}>Rechercher</button></form>{section==='professionals'&&<select aria-label="Statut" value={filter} disabled={busy} onChange={e=>{F(e.target.value);Page(1);}}><option value="">Tous les statuts</option><option value="pending">En attente</option><option value="verified">Validés</option><option value="rejected">Refusés</option><option value="revoked">Révoqués</option><option value="incomplete">Incomplets</option></select>}</div>
+  {section==='professionals'&&<p className="hint">Consultez le dossier et vérifiez les justificatifs auprès de l’organisme émetteur avant de valider.</p>}
+  {loading?<p>Chargement…</p>:data&&<><div className="table-wrap"><table><thead><tr>{(section==='professionals'?['Identifiant','Dossier professionnel','Statut','Action']:section==='users'?['Identifiant','Email','Statut','Action']:section==='medicines'?['Médicament','Auteur','Publication','Source']:['Médicament','Type','Utilisateur','Description','Date']).map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{rows.map(r=><tr key={r.id}>{section==='professionals'?<><td>{r.user__username}<br/><small>{r.user__email}</small></td><td>{r.application_status==='incomplete'?<span>Dossier à compléter</span>:<details><summary>{r.full_name} — {r.profession}</summary><p>Matricule : {r.registration_number}<br/>Organisme : {r.issuer}<br/>Établissement : {r.institution}<br/>Ville / pays : {r.location}<br/>Téléphone : {r.phone}<br/>Déposé le : {new Date(r.submitted_at).toLocaleString('fr-FR')}</p><button className="secondary" disabled={busy} onClick={()=>downloadProof(r.id)}>Télécharger le justificatif</button></details>}</td><td><span className="tag">{!r.user__is_active?'Suspendu':({pending:'En attente',approved:'Validé',rejected:'Refusé',revoked:'Révoqué',incomplete:'Incomplet'}[r.application_status])}</span>{r.reason&&<p>{r.reason}</p>}</td><td>{r.application_status==='pending'&&<div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button disabled={busy||!r.user__is_active} onClick={()=>decide(r,true)}>Valider</button><button className="danger" disabled={busy} onClick={()=>decide(r,false)}>Refuser</button></div>}{r.application_status==='approved'&&<button className="danger" disabled={busy} onClick={()=>decide(r,false)}>Révoquer</button>}</td></>:section==='users'?<><td>{r.username}</td><td>{r.email}</td><td>{r.is_staff||r.is_superuser?'Administrateur / staff':r.is_active?'Actif':'Suspendu'}</td><td>{!(r.is_staff||r.is_superuser)&&<button className={r.is_active?'danger':'primary'} disabled={busy} onClick={()=>action(`admin/users/${r.id}/`,{active:!r.is_active},'Confirmer la modification du compte ?')}>{r.is_active?'Suspendre':'Réactiver'}</button>}</td></>:section==='medicines'?<><td>{r.name}</td><td>{r.author__username}</td><td>{r.published?'Publié (démo possible)':'Non publié'}</td><td>{/^https?:\/\//i.test(r.source||'')?<a href={r.source} target="_blank" rel="noreferrer">Consulter</a>:'—'}</td></>:<><td>{r.medicine}</td><td>{{expired:'Périmé',suspect:'Suspect',adverse:'Effet indésirable'}[r.kind]||r.kind}</td><td>{r.user__username}</td><td>{r.details}</td><td>{new Date(r.created).toLocaleString('fr-FR')}</td></>}</tr>)}</tbody></table></div>{rows.length===0&&<p className="hint">Aucun résultat.</p>}<div className="pagination"><span>{data.count} résultat(s) · Page {page} / {Math.max(1,Math.ceil(data.count/20))}</span><div><button className="secondary" disabled={busy||!data.previous} onClick={()=>Page(p=>p-1)}>Précédent</button> <button disabled={busy||!data.next} onClick={()=>Page(p=>p+1)}>Suivant</button></div></div></>}
+  </section>}
+  <footer>MediCheck AI · Prototype de développement · Les fiches publiées ne prouvent pas une validation médicale.</footer></main></div>;
+}
+createRoot(document.getElementById('root')).render(<App/>);
