@@ -7,6 +7,16 @@
     "plugins": [
       "expo-secure-store",
       "expo-font"
-    ]
+    ],
+    "android": {
+      "package": "com.medicheck.ai",
+      "versionCode": 1
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9afc331c-28c5-4a81-87f7-46b553b1087f"
+      }
+    },
+    "owner": "christ-ph"
   }
 }
